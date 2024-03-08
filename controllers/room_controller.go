@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -87,9 +88,13 @@ func GetDetailRoom(w http.ResponseWriter, r *http.Request) {
 	var room models.Room
 	err := row.Scan(&room.ID, &room.RoomName, &room.GameID)
 	if err != nil {
-		log.Fatal(err)
+		if err == sql.ErrNoRows {
+			http.Error(w, "Room not found", http.StatusNotFound)
+			return
+		} else {
+			log.Fatal(err)
+		}
 	}
-
 	rows, err := db.Query(`
 	SELECT p.id, p.id_account, a.username 
 	FROM participants p 
@@ -158,18 +163,27 @@ func InsertRoom(w http.ResponseWriter, r *http.Request) {
 	var maxPlayers int
 	err := row.Scan(&maxPlayers)
 	if err != nil {
-		log.Fatal(err)
+		if err == sql.ErrNoRows {
+			http.Error(w, "Room not found", http.StatusNotFound)
+			return
+		} else {
+			log.Fatal(err)
+		}
 	}
 
-	row = db.QueryRow("SELECT COUNT(*) FROM participants WHERE id_room = ?", id)
+	row = db.QueryRow("SELECT id FROM accounts WHERE id = ?", accountID)
 
-	var participantCount int
-	err = row.Scan(&participantCount)
+	var accountExists int
+	err = row.Scan(&accountExists)
 	if err != nil {
-		log.Fatal(err)
+		if err == sql.ErrNoRows {
+			http.Error(w, "Account not found", http.StatusNotFound)
+			return
+		} else {
+			log.Fatal(err)
+		}
 	}
-
-	if participantCount < maxPlayers {
+	if accountExists < maxPlayers {
 		_, err = db.Exec("INSERT INTO participants (id_room, id_account) VALUES (?, ?)", id, accountID)
 		if err != nil {
 			log.Fatal(err)
@@ -206,16 +220,35 @@ func LeaveRoom(w http.ResponseWriter, r *http.Request) {
 	id := vars["id"]
 	accountID := vars["account_id"]
 
-	_, err := db.Exec("DELETE FROM participants WHERE id_room = ? AND id_account = ?", id, accountID)
-	if err != nil {
-		response := LeaveRoomResponse{
-			Status:  400,
-			Message: "Failed to leave the room",
-		}
+	row := db.QueryRow("SELECT id FROM rooms WHERE id = ?", id)
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-		return
+	var roomExists int
+	err := row.Scan(&roomExists)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Room not found", http.StatusNotFound)
+			return
+		} else {
+			log.Fatal(err)
+		}
+	}
+
+	row = db.QueryRow("SELECT id FROM accounts WHERE id = ?", accountID)
+
+	var accountExists int
+	err = row.Scan(&accountExists)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Account not found", http.StatusNotFound)
+			return
+		} else {
+			log.Fatal(err)
+		}
+	}
+
+	_, err = db.Exec("DELETE FROM participants WHERE id_room = ? AND id_account = ?", id, accountID)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	response := LeaveRoomResponse{
