@@ -10,18 +10,6 @@ import (
 	"github.com/gorilla/mux"
 )
 
-type RoomResponseItem struct {
-	ID       int    `json:"id"`
-	RoomName string `json:"room_name"`
-}
-
-type RoomsResponse struct {
-	Status int `json:"status"`
-	Data   struct {
-		Rooms []RoomResponseItem `json:"rooms"`
-	} `json:"data"`
-}
-
 func GetAllRooms(w http.ResponseWriter, r *http.Request) {
 	db := connect()
 	defer db.Close()
@@ -32,9 +20,9 @@ func GetAllRooms(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var rooms []RoomResponseItem
+	var rooms []models.RoomResponseItem
 	for rows.Next() {
-		var room RoomResponseItem
+		var room models.RoomResponseItem
 		err := rows.Scan(&room.ID, &room.RoomName)
 		if err != nil {
 			log.Fatal(err)
@@ -46,10 +34,10 @@ func GetAllRooms(w http.ResponseWriter, r *http.Request) {
 		log.Fatal(err)
 	}
 
-	response := RoomsResponse{
+	response := models.RoomsResponse{
 		Status: 200,
 		Data: struct {
-			Rooms []RoomResponseItem `json:"rooms"`
+			Rooms []models.RoomResponseItem `json:"rooms"`
 		}{
 			Rooms: rooms,
 		},
@@ -57,23 +45,6 @@ func GetAllRooms(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
-}
-
-type GetDetailRoomParticipant struct {
-	ID        int    `json:"id"`
-	AccountID int    `json:"account_id"`
-	Username  string `json:"username"`
-}
-
-type RoomDetailResponse struct {
-	Status int `json:"status"`
-	Data   struct {
-		Room struct {
-			ID           int                        `json:"id"`
-			RoomName     string                     `json:"room_name"`
-			Participants []GetDetailRoomParticipant `json:"participants"`
-		} `json:"room"`
-	} `json:"data"`
 }
 
 func GetDetailRoom(w http.ResponseWriter, r *http.Request) {
@@ -106,9 +77,9 @@ func GetDetailRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var participants []GetDetailRoomParticipant
+	var participants []models.GetDetailRoomParticipant
 	for rows.Next() {
-		var participant GetDetailRoomParticipant
+		var participant models.GetDetailRoomParticipant
 		err := rows.Scan(&participant.ID, &participant.AccountID, &participant.Username)
 		if err != nil {
 			log.Fatal(err)
@@ -120,19 +91,19 @@ func GetDetailRoom(w http.ResponseWriter, r *http.Request) {
 		log.Fatal(err)
 	}
 
-	response := RoomDetailResponse{
+	response := models.RoomDetailResponse{
 		Status: 200,
 		Data: struct {
 			Room struct {
-				ID           int                        `json:"id"`
-				RoomName     string                     `json:"room_name"`
-				Participants []GetDetailRoomParticipant `json:"participants"`
+				ID           int                               `json:"id"`
+				RoomName     string                            `json:"room_name"`
+				Participants []models.GetDetailRoomParticipant `json:"participants"`
 			} `json:"room"`
 		}{
 			Room: struct {
-				ID           int                        `json:"id"`
-				RoomName     string                     `json:"room_name"`
-				Participants []GetDetailRoomParticipant `json:"participants"`
+				ID           int                               `json:"id"`
+				RoomName     string                            `json:"room_name"`
+				Participants []models.GetDetailRoomParticipant `json:"participants"`
 			}{
 				ID:           room.ID,
 				RoomName:     room.RoomName,
@@ -143,11 +114,6 @@ func GetDetailRoom(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
-}
-
-type InsertRoomResponse struct {
-	Status  int    `json:"status"`
-	Message string `json:"message"`
 }
 
 func InsertRoom(w http.ResponseWriter, r *http.Request) {
@@ -183,13 +149,22 @@ func InsertRoom(w http.ResponseWriter, r *http.Request) {
 			log.Fatal(err)
 		}
 	}
-	if accountExists < maxPlayers {
+
+	row = db.QueryRow("SELECT COUNT(*) FROM participants WHERE id_room = ?", id)
+
+	var participantCount int
+	err = row.Scan(&participantCount)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if participantCount < maxPlayers {
 		_, err = db.Exec("INSERT INTO participants (id_room, id_account) VALUES (?, ?)", id, accountID)
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		response := InsertRoomResponse{
+		response := models.InsertRoomResponse{
 			Status:  200,
 			Message: "Successfully joined the room",
 		}
@@ -197,7 +172,7 @@ func InsertRoom(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
 	} else {
-		response := InsertRoomResponse{
+		response := models.InsertRoomResponse{
 			Status:  400,
 			Message: "The room is full",
 		}
@@ -246,9 +221,19 @@ func LeaveRoom(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_, err = db.Exec("DELETE FROM participants WHERE id_room = ? AND id_account = ?", id, accountID)
+	result, err := db.Exec("DELETE FROM participants WHERE id_room = ? AND id_account = ?", id, accountID)
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if rowsAffected == 0 {
+		http.Error(w, "Account not in room", http.StatusNotFound)
+		return
 	}
 
 	response := LeaveRoomResponse{
